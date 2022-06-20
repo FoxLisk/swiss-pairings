@@ -9,7 +9,6 @@ pub enum MatchResult<'a, P: Player> {
 }
 
 pub trait Player: Eq + Hash {
-    fn bye() -> Self;
     /// must return an ID that is unique within the player set
     fn id(&self) -> String;
 }
@@ -165,11 +164,6 @@ struct MyPlayer {
 }
 
 impl Player for MyPlayer {
-    fn bye() -> Self {
-        Self {
-            id: "Bye".to_string(),
-        }
-    }
     fn id(&self) -> String {
         self.id.clone()
     }
@@ -185,11 +179,6 @@ mod tests {
     }
 
     impl Player for TestPlayer {
-        fn bye() -> Self {
-            Self {
-                id: "Bye".to_string(),
-            }
-        }
         fn id(&self) -> String {
             self.id.clone()
         }
