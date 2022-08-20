@@ -1,19 +1,60 @@
-use std::cmp::{min};
+extern crate itertools;
+
+mod nested_permutations;
+
+use std::cmp::{min, Ordering};
 use std::collections::{BinaryHeap, HashMap, HashSet};
-use std::fmt::Debug;
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
+use std::ops::Index;
+use itertools::Itertools;
+use permutator::HeapPermutationRefIter;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
+use crate::nested_permutations::ChunkPermutator;
 use crate::subgroups::SubgroupIterator;
 
 // player order matters for determining initial pairing
 // in principle it also matters in chess for white/black stuff, although that's not implemented here
+// probably this should not have the Player trait bound, for good citizenship reasons, i believe
+// it is generally considered better to add trait bounds on functions instead of structs
+#[derive(Debug)]
 pub enum MatchResult<'a, P: Player> {
     Player1Win { p1: &'a P, p2: &'a P },
     Player2Win { p1: &'a P, p2: &'a P },
     Draw { p1: &'a P, p2: &'a P },
 }
 
+pub fn format_round<P: Player>(round: &Round<P>) -> String {
+    if round.len() == 0 {
+        return "".to_string();
+    }
+
+    let mut mus = Vec::with_capacity(round.len());
+    for mr in round {
+        let formatted = match mr {
+            MatchResult::Player1Win { p1, p2 } => { format!("{} > {}", p1.id(), p2.id())}
+            MatchResult::Player2Win { p1, p2 } => { format!("{} < {}", p1.id(), p2.id())}
+            MatchResult::Draw { p1, p2 } => {       format!("{} = {}", p1.id(), p2.id())}
+        };
+        mus.push(formatted);
+    }
+    mus.join("\n")
+}
+
+pub fn format_bracket<P: Player>(rounds: &Vec<Round<P>>) -> String {
+    let mut rounds_out = vec![];
+    let mut rn = 1;
+    for round in rounds {
+        rounds_out.push(format!("Round {}:", rn));
+        rounds_out.push("".to_string());
+        rn += 1;
+        rounds_out.push(format_round(round));
+        rounds_out.push("".to_string());
+    }
+    rounds_out.join("\n")
+}
 
 pub trait Player: Eq + Hash + Debug {
     /// must return an ID that is unique within the player set
@@ -41,6 +82,23 @@ pub enum PairingError {
     /// you cannot pair zero players
     NoPlayers,
     Other { err: String },
+}
+
+impl Display for PairingError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PairingError::MissingInitialRound => { write!(f, "Missing initial round")}
+            PairingError::DuplicatePlayer { id } => {write!(f, "Duplicate player with id {}", id)}
+            PairingError::UnexpectedPlayerAdded { id } => {write!(f, "Player unexpectedly added after first round: {}", id)}
+            PairingError::RepeatedPairing { p1, p2 } => {write!(f, "Illegal repeated pairing found: {} vs {}", p1, p2)}
+            PairingError::NoPlayers => {write!(f, "No players given?")}
+            PairingError::Other { err } => {write!(f, "Other error: {}", err)}
+        }
+    }
+}
+
+impl Error for PairingError {
+
 }
 
 /// Scores are integers for ease of implementation. if you want 1/0/0.5, use 2/0/1 and divide
@@ -164,23 +222,152 @@ where
 }
 
 
-/// i.e. 1v2, 3v4, etc
-pub fn monrad_pairings_shuffle_between<'a, P: Player>(
+/// the idea on this one is to go through the score groups, and in each score group, try
+/// permutations until you find one that results in a valid pairing
+pub fn random_by_scoregroup<'a, P: Player>(
     initial_seeding: &[&'a P],
     scores: &HashMap<&'a P, Score>,
     opponents: &HashMap<&'a P, HashSet<&'a P>>,
 ) -> Result<Vec<(&'a P, &'a P)>, PairingError> {
+    if scores.is_empty() {
+        return Err(PairingError::MissingInitialRound);
+    }
+    let mut score_groups_builder = HashMap::with_capacity(initial_seeding.len());
+    for (p, s) in scores.iter() {
+        score_groups_builder.entry(*s).or_insert(vec![]).push(*p);
+    }
+    let mut score_groups = score_groups_builder.into_iter().collect::<Vec<_>>();
+    score_groups.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    let mut pairings: Vec<(&P, &P)> = vec![];
+    let mut players = score_groups.pop().unwrap().1;
+    loop {
+        let mut shuffler = unsafe {
+            HeapPermutationRefIter::new(&mut players[..] as *mut[&P])
+        };
+        loop {
+            let (candidate, unpaired) = pair_group(&players, opponents);
+            if unpaired.len() <= 1 || shuffler.next().is_none() {
+                // if we did a good job or we're out of permutations to try, just move on
+                // this might actually downpair more than the minimum number of players sometimes,
+                // that's something to think about later
+                pairings.extend(candidate);
+                players = unpaired;
+                break;
+            }
+        }
+        if let Some(more) = score_groups.pop() {
+            players.extend(more.1);
+        } else {
+            break;
+        }
+    }
+    if !players.is_empty() {
+        Err(PairingError::Other {err: format!("Unable to pair some players: {:?}", players)})
+    } else {
+        Ok(pairings)
+    }
+}
 
+fn pair_group<'a, P: Player>(players: &Vec<&'a P>, opponents: &HashMap<&'a P, HashSet<&'a P>>) -> (Vec<(&'a P, &'a P)>, Vec<&'a P>) {
+    // gonna just do this inefficiently to see if it works, might worry about fixing it later
+    let mut unpairable = vec![];
+    let mut unpaired = players.iter().rev().map(|p|*p).collect::<Vec<_>>();
+    let mut pairings = vec![];
+    'outer: while unpaired.len() > 1 {
+        let p1 = unpaired.pop().unwrap();
+        let opps = opponents.get(p1).unwrap();
+        for i in (0..unpaired.len()).rev() {
+            if !opps.contains(unpaired[i]) {
+                let p2 = unpaired.remove(i);
+                pairings.push((p1, p2));
+                continue 'outer;
+            }
+        }
+        unpairable.push(p1);
+    }
+    // println!("extending {:?}", unpaired);
+    unpairable.extend(unpaired);
+    let nice = opponents.iter().map(|(k, v)| {
+        format!("{}: {{{}}}",
+            k.id(),
+            v.iter().map(|p| p.id()).join(",")
+        )
+    }).join(", ");
+    // println!("prior pairings: {}", nice);
+    // println!("input players: {:?}, pairings: {:?}, unpaired: {:?}", players, pairings, unpairable);
+    (pairings, unpairable)
+}
+
+
+/// i.e. 1v2, 3v4, etc
+/// this was an attempt to do basically "randomize the seeds and keep trying monrad pairings until
+/// you get 0 downpairings." it does not work.
+fn monrad_pairings_shuffle_between_keep_trying<'a, P: Player>(
+    initial_seeding: &[&'a P],
+    scores: &HashMap<&'a P, Score>,
+    opponents: &HashMap<&'a P, HashSet<&'a P>>,
+) -> Result<Vec<(&'a P, &'a P)>, PairingError> {
+    let mut score_groups_builder = HashMap::with_capacity(initial_seeding.len());
+    for (p, s) in scores.iter() {
+        score_groups_builder.entry(*s).or_insert(vec![]).push(*p);
+    }
+    let mut score_groups_builder_p2 = score_groups_builder.into_iter().collect::<Vec<_>>();
+    score_groups_builder_p2.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut seeds = vec![];
+    let mut indices = vec![];
+    let mut curr_i = 0;
+    for (_, group) in score_groups_builder_p2 {
+        let len = group.len();
+        seeds.extend(group);
+        indices.push((curr_i, curr_i + len));
+        curr_i = curr_i + len;
+    }
+    let mut permutator = unsafe {
+        let mut chunks = vec![];
+        for (s, e) in indices {
+            chunks.push(&mut seeds[s..e] as *mut [&P]);
+        }
+        ChunkPermutator::new(chunks)
+    };
+
+    let mut iterations = 0;
+
+    'outer: loop {
+        iterations += 1;
+        if iterations % 1000 == 0 {
+            println!("{:?}", seeds);
+        }
+        let pairings = monrad_pairings(
+            &seeds,
+            scores,
+            opponents
+        )?;
+        for (p1, p2) in pairings.iter() {
+            if scores.get(p1).unwrap() != scores.get(p2).unwrap() {
+                // someone is downpaired! stop the presses!
+                if ! permutator.permute() {
+                    // i mean who cares, at this point we've done our best
+                    return Ok(pairings);
+                }
+                continue 'outer;
+            }
+        }
+        return Ok(pairings);
+    }
+}
+
+fn monrad_pairings_shuffle_between<'a, P: Player>(
+    initial_seeding: &[&'a P],
+    scores: &HashMap<&'a P, Score>,
+    opponents: &HashMap<&'a P, HashSet<&'a P>>,
+) -> Result<Vec<(&'a P, &'a P)>, PairingError> {
+    let mut initial_seeds = initial_seeding.iter().map(|p| *p).collect::<Vec<_>>();
     let mut rng = thread_rng();
-    let mut seeds = initial_seeding.iter().map(|p| *p).collect::<Vec<&'a P>>();
-    seeds.shuffle(&mut rng);
-    monrad_pairings(
-        &seeds,
-        scores,
-        opponents
-    )
+    initial_seeds.shuffle(&mut rng);
+    monrad_pairings(&initial_seeds, scores, opponents)
 
 }
+
 /// i.e. 1v2, 3v4, etc
 pub fn monrad_pairings<'a, P: Player>(
     initial_seeding: &[&'a P],
@@ -395,7 +582,6 @@ pub fn fide_dutch_pairings<'a, P: Player>(
                 is_ppb,
                 &quality_criteria
             );
-            println!("eval: {:?}", eval);
 
             match eval {
                 Evaluation::Evaluation(qc) => {
@@ -422,7 +608,6 @@ pub fn fide_dutch_pairings<'a, P: Player>(
                 }
             }
         } else {
-            println!("s1: {:?}, s2: {:?}", s1, s2);
             let mut candidate = vec![];
             for i in 0..s1.len() {
                 candidate.push((s1[i], s2[i]));
@@ -436,7 +621,6 @@ pub fn fide_dutch_pairings<'a, P: Player>(
                 is_ppb,
                 &quality_criteria
             );
-            println!("eval: {:?}", eval);
 
             match eval {
                 Evaluation::Evaluation(qc) => {
@@ -598,12 +782,6 @@ impl Player for MyPlayer {
 mod tests {
     use std::collections::{HashMap, HashSet};
     use crate::{form_subgroups, monrad_pairings, swiss_pairings, MatchResult, Player, TourneyConfig, fide_dutch_pairings};
-
-    impl Player for i32 {
-        fn id(&self) -> String {
-            self.to_string()
-        }
-    }
 
     #[derive(PartialEq, Eq, Hash, Debug)]
     struct TestPlayer {
