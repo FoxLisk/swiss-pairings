@@ -116,8 +116,8 @@ fn main() -> Result<(), String> {
             p2_win(&aaron, &danty),
             p1_win(&rob, &coxla),
             p1_win(&spleebie, &cheamo),
-            p2_win(&flipheal, &shady)
-            ]
+            p2_win(&flipheal, &shady),
+        ],
     ];
 
     let f = swiss_pairings::monrad_pairings_shuffle_between;

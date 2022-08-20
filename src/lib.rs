@@ -1,19 +1,13 @@
 extern crate itertools;
 
-mod nested_permutations;
-
-use std::cmp::{min, Ordering};
+use std::cmp::{min};
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
-use std::ops::Index;
+
 use itertools::Itertools;
 use permutator::HeapPermutationRefIter;
-use rand::prelude::SliceRandom;
-use rand::thread_rng;
-use crate::nested_permutations::ChunkPermutator;
-use crate::subgroups::SubgroupIterator;
 
 // player order matters for determining initial pairing
 // in principle it also matters in chess for white/black stuff, although that's not implemented here
@@ -34,9 +28,15 @@ pub fn format_round<P: Player>(round: &Round<P>) -> String {
     let mut mus = Vec::with_capacity(round.len());
     for mr in round {
         let formatted = match mr {
-            MatchResult::Player1Win { p1, p2 } => { format!("{} > {}", p1.id(), p2.id())}
-            MatchResult::Player2Win { p1, p2 } => { format!("{} < {}", p1.id(), p2.id())}
-            MatchResult::Draw { p1, p2 } => {       format!("{} = {}", p1.id(), p2.id())}
+            MatchResult::Player1Win { p1, p2 } => {
+                format!("{} > {}", p1.id(), p2.id())
+            }
+            MatchResult::Player2Win { p1, p2 } => {
+                format!("{} < {}", p1.id(), p2.id())
+            }
+            MatchResult::Draw { p1, p2 } => {
+                format!("{} = {}", p1.id(), p2.id())
+            }
         };
         mus.push(formatted);
     }
@@ -74,32 +74,51 @@ pub enum PairingError {
     /// No first round given (you do the first round yourself with whatever seeding you want)
     MissingInitialRound,
     /// A player was involved in multiple matches in the same round
-    DuplicatePlayer { id: String },
+    DuplicatePlayer {
+        id: String,
+    },
     /// A player was added after the first round (which is not currently handled)
-    UnexpectedPlayerAdded { id: String },
+    UnexpectedPlayerAdded {
+        id: String,
+    },
     /// The pairing algorithm can be configured to error on repeated pairings in the history
-    RepeatedPairing { p1: String, p2: String },
+    RepeatedPairing {
+        p1: String,
+        p2: String,
+    },
     /// you cannot pair zero players
     NoPlayers,
-    Other { err: String },
+    Other {
+        err: String,
+    },
 }
 
 impl Display for PairingError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            PairingError::MissingInitialRound => { write!(f, "Missing initial round")}
-            PairingError::DuplicatePlayer { id } => {write!(f, "Duplicate player with id {}", id)}
-            PairingError::UnexpectedPlayerAdded { id } => {write!(f, "Player unexpectedly added after first round: {}", id)}
-            PairingError::RepeatedPairing { p1, p2 } => {write!(f, "Illegal repeated pairing found: {} vs {}", p1, p2)}
-            PairingError::NoPlayers => {write!(f, "No players given?")}
-            PairingError::Other { err } => {write!(f, "Other error: {}", err)}
+            PairingError::MissingInitialRound => {
+                write!(f, "Missing initial round")
+            }
+            PairingError::DuplicatePlayer { id } => {
+                write!(f, "Duplicate player with id {}", id)
+            }
+            PairingError::UnexpectedPlayerAdded { id } => {
+                write!(f, "Player unexpectedly added after first round: {}", id)
+            }
+            PairingError::RepeatedPairing { p1, p2 } => {
+                write!(f, "Illegal repeated pairing found: {} vs {}", p1, p2)
+            }
+            PairingError::NoPlayers => {
+                write!(f, "No players given?")
+            }
+            PairingError::Other { err } => {
+                write!(f, "Other error: {}", err)
+            }
         }
     }
 }
 
-impl Error for PairingError {
-
-}
+impl Error for PairingError {}
 
 /// Scores are integers for ease of implementation. if you want 1/0/0.5, use 2/0/1 and divide
 pub type Score = i32;
@@ -221,7 +240,6 @@ where
     Ok((pairings, standings))
 }
 
-
 /// the idea on this one is to go through the score groups, and in each score group, try
 /// permutations until you find one that results in a valid pairing
 pub fn random_by_scoregroup<'a, P: Player>(
@@ -241,9 +259,7 @@ pub fn random_by_scoregroup<'a, P: Player>(
     let mut pairings: Vec<(&P, &P)> = vec![];
     let mut players = score_groups.pop().unwrap().1;
     loop {
-        let mut shuffler = unsafe {
-            HeapPermutationRefIter::new(&mut players[..] as *mut[&P])
-        };
+        let mut shuffler = unsafe { HeapPermutationRefIter::new(&mut players[..] as *mut [&P]) };
         loop {
             let (candidate, unpaired) = pair_group(&players, opponents);
             if unpaired.len() <= 1 || shuffler.next().is_none() {
@@ -262,16 +278,21 @@ pub fn random_by_scoregroup<'a, P: Player>(
         }
     }
     if !players.is_empty() {
-        Err(PairingError::Other {err: format!("Unable to pair some players: {:?}", players)})
+        Err(PairingError::Other {
+            err: format!("Unable to pair some players: {:?}", players),
+        })
     } else {
         Ok(pairings)
     }
 }
 
-fn pair_group<'a, P: Player>(players: &Vec<&'a P>, opponents: &HashMap<&'a P, HashSet<&'a P>>) -> (Vec<(&'a P, &'a P)>, Vec<&'a P>) {
+fn pair_group<'a, P: Player>(
+    players: &Vec<&'a P>,
+    opponents: &HashMap<&'a P, HashSet<&'a P>>,
+) -> (Vec<(&'a P, &'a P)>, Vec<&'a P>) {
     // gonna just do this inefficiently to see if it works, might worry about fixing it later
     let mut unpairable = vec![];
-    let mut unpaired = players.iter().rev().map(|p|*p).collect::<Vec<_>>();
+    let mut unpaired = players.iter().rev().map(|p| *p).collect::<Vec<_>>();
     let mut pairings = vec![];
     'outer: while unpaired.len() > 1 {
         let p1 = unpaired.pop().unwrap();
@@ -287,85 +308,13 @@ fn pair_group<'a, P: Player>(players: &Vec<&'a P>, opponents: &HashMap<&'a P, Ha
     }
     // println!("extending {:?}", unpaired);
     unpairable.extend(unpaired);
-    let nice = opponents.iter().map(|(k, v)| {
-        format!("{}: {{{}}}",
-            k.id(),
-            v.iter().map(|p| p.id()).join(",")
-        )
-    }).join(", ");
+    let nice = opponents
+        .iter()
+        .map(|(k, v)| format!("{}: {{{}}}", k.id(), v.iter().map(|p| p.id()).join(",")))
+        .join(", ");
     // println!("prior pairings: {}", nice);
     // println!("input players: {:?}, pairings: {:?}, unpaired: {:?}", players, pairings, unpairable);
     (pairings, unpairable)
-}
-
-
-/// i.e. 1v2, 3v4, etc
-/// this was an attempt to do basically "randomize the seeds and keep trying monrad pairings until
-/// you get 0 downpairings." it does not work.
-fn monrad_pairings_shuffle_between_keep_trying<'a, P: Player>(
-    initial_seeding: &[&'a P],
-    scores: &HashMap<&'a P, Score>,
-    opponents: &HashMap<&'a P, HashSet<&'a P>>,
-) -> Result<Vec<(&'a P, &'a P)>, PairingError> {
-    let mut score_groups_builder = HashMap::with_capacity(initial_seeding.len());
-    for (p, s) in scores.iter() {
-        score_groups_builder.entry(*s).or_insert(vec![]).push(*p);
-    }
-    let mut score_groups_builder_p2 = score_groups_builder.into_iter().collect::<Vec<_>>();
-    score_groups_builder_p2.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut seeds = vec![];
-    let mut indices = vec![];
-    let mut curr_i = 0;
-    for (_, group) in score_groups_builder_p2 {
-        let len = group.len();
-        seeds.extend(group);
-        indices.push((curr_i, curr_i + len));
-        curr_i = curr_i + len;
-    }
-    let mut permutator = unsafe {
-        let mut chunks = vec![];
-        for (s, e) in indices {
-            chunks.push(&mut seeds[s..e] as *mut [&P]);
-        }
-        ChunkPermutator::new(chunks)
-    };
-
-    let mut iterations = 0;
-
-    'outer: loop {
-        iterations += 1;
-        if iterations % 1000 == 0 {
-            println!("{:?}", seeds);
-        }
-        let pairings = monrad_pairings(
-            &seeds,
-            scores,
-            opponents
-        )?;
-        for (p1, p2) in pairings.iter() {
-            if scores.get(p1).unwrap() != scores.get(p2).unwrap() {
-                // someone is downpaired! stop the presses!
-                if ! permutator.permute() {
-                    // i mean who cares, at this point we've done our best
-                    return Ok(pairings);
-                }
-                continue 'outer;
-            }
-        }
-        return Ok(pairings);
-    }
-}
-
-fn monrad_pairings_shuffle_between<'a, P: Player>(
-    initial_seeding: &[&'a P],
-    scores: &HashMap<&'a P, Score>,
-    opponents: &HashMap<&'a P, HashSet<&'a P>>,
-) -> Result<Vec<(&'a P, &'a P)>, PairingError> {
-    let mut initial_seeds = initial_seeding.iter().map(|p| *p).collect::<Vec<_>>();
-    let mut rng = thread_rng();
-    initial_seeds.shuffle(&mut rng);
-    monrad_pairings(&initial_seeds, scores, opponents)
-
 }
 
 /// i.e. 1v2, 3v4, etc
@@ -407,6 +356,7 @@ pub fn monrad_pairings<'a, P: Player>(
 
 mod subgroups {
     use std::cmp::min;
+
     use crate::{form_subgroups, Player};
 
     enum SubgroupIteratorState {
@@ -421,7 +371,6 @@ mod subgroups {
         m1: usize,
         is_heterogeneous: bool,
     }
-
 
     impl<'a, P: Player> SubgroupIterator<'a, P> {
         /// (Self, max_pairs)
@@ -441,39 +390,39 @@ mod subgroups {
                 max_pairs
             };
 
-
             /*
-        To make the pairing, each bracket[0] will be usually divided into two subgroups, called S1 and S2.
+            To make the pairing, each bracket[0] will be usually divided into two subgroups, called S1 and S2.
 
-        S1 initially contains the highest N1 players (sorted according to A.2), where N1 is either
-            M1 (in a heterogeneous bracket) or MaxPairs (otherwise).
-        S2 initially contains all the remaining resident players.
-        When M1 is less than M0, some MDPs are not included in S1. The excluded MDPs
-            (in number of M0 - M1), who are neither in S1 nor in S2, are said to be in a Limbo.
+            S1 initially contains the highest N1 players (sorted according to A.2), where N1 is either
+                M1 (in a heterogeneous bracket) or MaxPairs (otherwise).
+            S2 initially contains all the remaining resident players.
+            When M1 is less than M0, some MDPs are not included in S1. The excluded MDPs
+                (in number of M0 - M1), who are neither in S1 nor in S2, are said to be in a Limbo.
 
-        [0] A (pairing) bracket is a group of players to be paired. It is composed of players coming
-            from one same scoregroup (called resident players) and of players who remained unpaired
-            after the pairing of the previous bracket.
+            [0] A (pairing) bracket is a group of players to be paired. It is composed of players coming
+                from one same scoregroup (called resident players) and of players who remained unpaired
+                after the pairing of the previous bracket.
 
-        implementation note: manually constructing S1 and S2 seems exhausting. basically
-            S1 = mdps + resident_players[:n1-m0]
-            S2 = resident_players[n1-m0:]
+            implementation note: manually constructing S1 and S2 seems exhausting. basically
+                S1 = mdps + resident_players[:n1-m0]
+                S2 = resident_players[n1-m0:]
 
-         */
+             */
 
             // n1 should maybe be calculated in the func
-            let (s1, s2, limbo) = {
-                form_subgroups(mdps, resident_players, n1)
-            };
+            let (s1, s2, limbo) = { form_subgroups(mdps, resident_players, n1) };
 
-            (Self {
-                s1,
-                s2,
-                limbo,
-                state: SubgroupIteratorState::Fresh,
-                m1,
-                is_heterogeneous
-            }, max_pairs)
+            (
+                Self {
+                    s1,
+                    s2,
+                    limbo,
+                    state: SubgroupIteratorState::Fresh,
+                    m1,
+                    is_heterogeneous,
+                },
+                max_pairs,
+            )
         }
 
         pub(crate) fn get_s1(&self) -> &Vec<&P> {
@@ -490,8 +439,6 @@ mod subgroups {
         }
     }
 }
-
-
 
 // this is so complicated
 // https://handbook.fide.com/chapter/C0403
@@ -526,13 +473,12 @@ pub fn fide_dutch_pairings<'a, P: Player>(
         // penultimate pairing bracket; it is the "last paired bracket" (see A.9)
         // (it's penultimate because there is sometimes a "collapsed last bracket" afterward)
         let is_ppb = score_group_scores.is_empty();
-        let mut resident_players = score_groups.remove(&this_score).ok_or(
-            PairingError::Other { err: format!("missing {} from scores", this_score)}
-        )?;
+        let mut resident_players = score_groups
+            .remove(&this_score)
+            .ok_or(PairingError::Other {
+                err: format!("missing {} from scores", this_score),
+            })?;
         resident_players.sort_by_key(|p| initial_seeds.get(*p).unwrap());
-
-
-
 
         let m0 = mdps.len();
         let max_pairs = min((resident_players.len() + m0) / 2, resident_players.len());
@@ -547,11 +493,8 @@ pub fn fide_dutch_pairings<'a, P: Player>(
         };
         let more_references_to_mdps = mdps.iter().map(|p| *p).collect::<Vec<&P>>();
 
-
         // n1 should maybe be calculated in the func
-        let (s1, s2, limbo) = {
-            form_subgroups(more_references_to_mdps, resident_players, n1)
-        };
+        let (s1, s2, limbo) = { form_subgroups(more_references_to_mdps, resident_players, n1) };
 
         let mut best_score = QualityCriteria::min();
         let mut best_scoring_candidate = vec![];
@@ -563,25 +506,18 @@ pub fn fide_dutch_pairings<'a, P: Player>(
             }
             let remainder: Vec<&P> = s2.iter().skip(s1.len()).map(|p| *p).collect();
             let n1r = remainder.len() / 2;
-            let (s1r, s2r, limbor) = form_subgroups(
-                vec![], remainder, n1r
-            );
+            let (s1r, s2r, limbor) = form_subgroups(vec![], remainder, n1r);
             let mut remainder_candidate = vec![];
             for i in 0..s1r.len() {
                 remainder_candidate.push((s1r[i], s2r[i]));
             }
-            let candidate = mdp_pairing.iter().chain(&remainder_candidate)
+            let candidate = mdp_pairing
+                .iter()
+                .chain(&remainder_candidate)
                 .map(|(a, b)| (*a, *b))
                 .collect::<Vec<(&P, &P)>>();
-            let quality_criteria = EvaluationCriteria {
-                max_pairs
-            };
-            let eval = evaluate_candidate::<P>(
-                &candidate,
-                &opponents,
-                is_ppb,
-                &quality_criteria
-            );
+            let quality_criteria = EvaluationCriteria { max_pairs };
+            let eval = evaluate_candidate::<P>(&candidate, &opponents, is_ppb, &quality_criteria);
 
             match eval {
                 Evaluation::Evaluation(qc) => {
@@ -612,15 +548,8 @@ pub fn fide_dutch_pairings<'a, P: Player>(
             for i in 0..s1.len() {
                 candidate.push((s1[i], s2[i]));
             }
-            let quality_criteria = EvaluationCriteria {
-                max_pairs
-            };
-            let eval = evaluate_candidate::<P>(
-                &candidate,
-                &opponents,
-                is_ppb,
-                &quality_criteria
-            );
+            let quality_criteria = EvaluationCriteria { max_pairs };
+            let eval = evaluate_candidate::<P>(&candidate, &opponents, is_ppb, &quality_criteria);
 
             match eval {
                 Evaluation::Evaluation(qc) => {
@@ -647,9 +576,6 @@ pub fn fide_dutch_pairings<'a, P: Player>(
                 }
             }
         }
-
-
-
     }
 
     let mut pairings: Vec<(&P, &P)> = Vec::with_capacity(10);
@@ -697,7 +623,6 @@ fn form_subgroups<'a, P: Player>(
     (s1, s2, limbo)
 }
 
-
 /// the stuff in C0403 from C.5 to C.19
 #[derive(PartialEq, PartialOrd, Debug)]
 struct QualityCriteria {
@@ -706,12 +631,9 @@ struct QualityCriteria {
 
 impl QualityCriteria {
     fn min() -> Self {
-        Self {
-            num_pairs: 0
-        }
+        Self { num_pairs: 0 }
     }
 }
-
 
 #[derive(Debug)]
 enum Evaluation {
@@ -751,7 +673,6 @@ fn evaluate_candidate<P: Player>(
     // I do not know what that means. this is supposed to be an evaluation step, not a "choose"
     // step. I am going to ignore this because it doesn't make sense.
 
-
     // C.5. maximize the number of pairs (equivalent to: minimize the number of downfloaters).
     // The document indicates that this is something that can be "fulfilled" rather than a scalar,
     // which I suppose means something like "num_pairs = floor(bracket_size/2)"?
@@ -759,11 +680,7 @@ fn evaluate_candidate<P: Player>(
     if n_pairs == crit.max_pairs {
         Evaluation::Perfect
     } else {
-        Evaluation::Evaluation(
-            QualityCriteria {
-                num_pairs: n_pairs
-            }
-        )
+        Evaluation::Evaluation(QualityCriteria { num_pairs: n_pairs })
     }
 }
 
@@ -781,7 +698,11 @@ impl Player for MyPlayer {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{form_subgroups, monrad_pairings, swiss_pairings, MatchResult, Player, TourneyConfig, fide_dutch_pairings};
+
+    use crate::{
+        fide_dutch_pairings, form_subgroups, MatchResult, monrad_pairings, Player, swiss_pairings,
+        TourneyConfig,
+        };
 
     #[derive(PartialEq, Eq, Hash, Debug)]
     struct TestPlayer {
@@ -983,7 +904,7 @@ mod tests {
             (&1, HashSet::new()),
             (&2, HashSet::new()),
             (&3, HashSet::new()),
-            (&4, HashSet::new())
+            (&4, HashSet::new()),
         ]);
         let pairs = fide_dutch_pairings(&players, &scores, &opps);
         assert_eq!(Ok(vec![(&1, &3), (&2, &4)]), pairs);
