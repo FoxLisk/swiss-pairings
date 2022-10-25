@@ -6,7 +6,7 @@ use dotenv::var;
 use rand::rngs::ThreadRng;
 use rand::{thread_rng, Rng};
 use std::cmp::max;
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::io::Write;
 use std::time::Instant;
 use std::{env, io};
@@ -92,7 +92,7 @@ fn do_a_bracket(players: Vec<ToyPlayer>) -> Result<(i32, Vec<(ToyPlayer, i32)>),
         points_per_win: 2,
         points_per_loss: 0,
         points_per_draw: 1,
-        error_on_repeated_opponent: false,
+        error_on_repeated_opponent: true,
     };
     let mut initial_pairings = vec![];
 
@@ -100,7 +100,6 @@ fn do_a_bracket(players: Vec<ToyPlayer>) -> Result<(i32, Vec<(ToyPlayer, i32)>),
         initial_pairings.push((&players[2 * i], &players[2 * i + 1]));
     }
     assert_eq!(players.len() / 2, initial_pairings.len());
-    // let mut decider = Decider::Random(thread_rng());
     let mut decider = thread_rng();
     let first_round = decide_matchups(&initial_pairings, &mut decider);
     let mut rounds: Vec<Vec<MatchResult<ToyPlayer>>> = vec![first_round];

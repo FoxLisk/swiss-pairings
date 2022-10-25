@@ -1,6 +1,6 @@
 extern crate itertools;
 
-use std::cmp::{min};
+use std::cmp::min;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
@@ -214,7 +214,7 @@ where
                 });
             }
             let p2_opps = opponents
-                .get_mut(p1)
+                .get_mut(p2)
                 .ok_or(PairingError::UnexpectedPlayerAdded { id: p1.id() })?;
 
             if !p2_opps.insert(p1) && config.error_on_repeated_opponent {
@@ -700,9 +700,9 @@ mod tests {
     use std::collections::{HashMap, HashSet};
 
     use crate::{
-        fide_dutch_pairings, form_subgroups, MatchResult, monrad_pairings, Player, swiss_pairings,
+        fide_dutch_pairings, form_subgroups, monrad_pairings, swiss_pairings, MatchResult, Player,
         TourneyConfig,
-        };
+    };
 
     #[derive(PartialEq, Eq, Hash, Debug)]
     struct TestPlayer {
