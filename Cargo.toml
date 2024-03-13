@@ -9,6 +9,7 @@ edition = "2021"
 rand = "0.8.5"
 itertools = "0.10"
 permutator = "0.4"
+anyhow = "1.0.80"
 
 [dev-dependencies]
 dotenv = "0.15.0"

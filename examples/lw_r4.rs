@@ -120,12 +120,12 @@ fn main() -> Result<(), String> {
         ],
     ];
 
-    let f = swiss_pairings::monrad_pairings_shuffle_between;
+    // let f = swiss_pairings::monrad_pairings_shuffle_between;
 
-    // round 1 was handled separately above because of poor design decisions
-    let (pairings, standings) = swiss_pairings::swiss_pairings(&rounds, &config, f).unwrap();
-    println!("pairings:  {:?}", pairings);
-    println!("   standings: {:?}", standings);
+    // // round 1 was handled separately above because of poor design decisions
+    // let (pairings, standings) = swiss_pairings::swiss_pairings(&rounds, &config, f).unwrap();
+    // println!("pairings:  {:?}", pairings);
+    // println!("   standings: {:?}", standings);
 
     Ok(())
 }

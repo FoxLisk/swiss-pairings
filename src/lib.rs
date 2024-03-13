@@ -7,7 +7,10 @@ use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 
 use itertools::Itertools;
+use permutation_utils::pair_partitions;
 use permutator::HeapPermutationRefIter;
+
+mod permutation_utils;
 
 // player order matters for determining initial pairing
 // in principle it also matters in chess for white/black stuff, although that's not implemented here
@@ -240,29 +243,23 @@ where
     Ok((pairings, standings))
 }
 
-/// the idea on this one is to go through the score groups, and in each score group, try
-/// permutations until you find one that results in a valid pairing
-pub fn random_by_scoregroup<'a, P: Player>(
-    initial_seeding: &[&'a P],
-    scores: &HashMap<&'a P, Score>,
+pub fn _random_by_scoregroup<'a, P: Player>(
+    mut score_groups: Vec<(i32, Vec<&'a P>)>,
     opponents: &HashMap<&'a P, HashSet<&'a P>>,
 ) -> Result<Vec<(&'a P, &'a P)>, PairingError> {
-    if scores.is_empty() {
-        return Err(PairingError::MissingInitialRound);
-    }
-    let mut score_groups_builder = HashMap::with_capacity(initial_seeding.len());
-    for (p, s) in scores.iter() {
-        score_groups_builder.entry(*s).or_insert(vec![]).push(*p);
-    }
-    let mut score_groups = score_groups_builder.into_iter().collect::<Vec<_>>();
-    score_groups.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     let mut pairings: Vec<(&P, &P)> = vec![];
     let mut players = score_groups.pop().unwrap().1;
     loop {
         let mut shuffler = unsafe { HeapPermutationRefIter::new(&mut players[..] as *mut [&P]) };
         loop {
             let (candidate, unpaired) = pair_group(&players, opponents);
+            let mut s = String::new();
+            for (p1, p2) in candidate.iter() {
+                s.push_str(&format!("{} vs {}\n", p1.id(), p2.id()));
+            }
+            // println!("Candidate bracket: \n{s}");
             if unpaired.len() <= 1 || shuffler.next().is_none() {
+                // println!("Good enough, moving on");
                 // if we did a good job or we're out of permutations to try, just move on
                 // this might actually downpair more than the minimum number of players sometimes,
                 // that's something to think about later
@@ -283,6 +280,112 @@ pub fn random_by_scoregroup<'a, P: Player>(
         })
     } else {
         Ok(pairings)
+    }
+}
+
+/// the idea on this one is to go through the score groups, and in each score group, try
+/// permutations until you find one that results in a valid pairing
+pub fn random_by_scoregroup<'a, P: Player>(
+    initial_seeding: &[&'a P],
+    scores: &HashMap<&'a P, Score>,
+    opponents: &HashMap<&'a P, HashSet<&'a P>>,
+) -> Result<Vec<(&'a P, &'a P)>, PairingError> {
+    if scores.is_empty() {
+        return Err(PairingError::MissingInitialRound);
+    }
+    let mut score_groups_builder = HashMap::with_capacity(initial_seeding.len());
+    for (p, s) in scores.iter() {
+        score_groups_builder.entry(*s).or_insert(vec![]).push(*p);
+    }
+    // [(score, [players_with_that_score])]
+    let mut score_groups = score_groups_builder.into_iter().collect::<Vec<_>>();
+    score_groups.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+    println!("Calling rec_pair");
+    match rec_pair(
+        score_groups.into_iter().map(|(_, p)| p).collect::<_>(),
+        opponents,
+    ) {
+        Some(p) => Ok(p),
+        None => Err(PairingError::Other {
+            err: "Unable to find a valid pairing".to_string(),
+        }),
+    }
+}
+
+/// pairs all players using a recursive implementation of the following algorithm:
+/// 
+/// 1. take the highest score group left
+/// 2. if it's got an even number of players, try to pair it
+///   2a. if pairing succeeds, try to recursively pair remaining players
+///   2b. if this also succeeds, return this result
+/// 3. if it's an odd number of players or 2a. fails:
+///   3a. for each player in the *next* score group
+fn rec_pair<'a, P: Player>(
+    mut score_groups: Vec<Vec<&'a P>>,
+    opponents: &HashMap<&'a P, HashSet<&'a P>>,
+) -> Option<Vec<(&'a P, &'a P)>> {
+    let our_score_group = match score_groups.pop() {
+        Some(p) => p,
+        None => {
+            return Some(vec![]);
+        }
+    };
+
+    if our_score_group.is_empty() {
+        return Some(vec![]);
+    }
+
+    let is_valid_pairing = |p: &Vec<(&P, &P)>| {
+        for (p1, p2) in p {
+            if opponents.get(p1).map(|os| os.contains(p2)).unwrap_or(false) {
+                return false;
+            }
+        }
+        true
+    };
+
+    println!(
+        "rec_pair: trying to pair score group {}",
+        our_score_group.iter().map(|p| p.id()).join(" ")
+    );
+
+    if our_score_group.len() % 2 == 0 {
+        let pairings = pair_partitions(our_score_group.copy_references()).ok()?;
+        for pairing in pairings {
+            if is_valid_pairing(&pairing) {
+                let mut rest_paired = rec_pair(score_groups, opponents)?;
+                rest_paired.extend(pairing);
+                return Some(rest_paired);
+            }
+        }
+    }
+    let next_group = score_groups.pop()?;
+    let mut i = 0;
+    while i < next_group.len() {
+        let mut our_group_copy = our_score_group.copy_references();
+        let mut next_group_copy = next_group.copy_references();
+        let mut score_groups_copy = score_groups.iter().cloned().collect::<Vec<_>>();
+        let trial_person = next_group_copy.swap_remove(i);
+        our_group_copy.push(trial_person);
+        score_groups_copy.push(next_group_copy);
+        score_groups_copy.push(our_group_copy);
+        if let Some(pairings) = rec_pair(score_groups_copy, opponents) {
+            return Some(pairings);
+        }
+        i += 1;
+    }
+
+    None
+}
+
+trait CopyReferences {
+    fn copy_references(&self) -> Self;
+}
+
+impl<T> CopyReferences for Vec<&T> {
+    fn copy_references(&self) -> Self {
+        self.iter().map(|e| *e).collect()
     }
 }
 
