@@ -1,3 +1,5 @@
+//! This file is less of an example and more of a place that I use to test things at this point
+//! but i dont feel like rearranging it :\
 extern crate core;
 extern crate rand;
 extern crate swiss_pairings;
@@ -57,7 +59,7 @@ fn a_specific_6p_bracket() {
 
     println!("{}", format_bracket(&rounds));
 
-    let (pairings, standings) =
+    let (pairings, _standings) =
         swiss_pairings::swiss_pairings(&rounds, &config, swiss_pairings::random_by_scoregroup)
             .unwrap();
     println!("{pairings:?}");
@@ -77,7 +79,7 @@ fn another_specific_6p_bracket() {
 
     println!("{}", format_bracket(&rounds));
 
-    let (pairings, standings) =
+    let (pairings, _standings) =
         swiss_pairings::swiss_pairings(&rounds, &config, swiss_pairings::random_by_scoregroup)
             .unwrap();
     println!("{pairings:?}");
@@ -98,7 +100,7 @@ fn a_6p_with_draws() {
 
     println!("{}", format_bracket(&rounds));
 
-    let (pairings, standings) =
+    let (pairings, _standings) =
         swiss_pairings::swiss_pairings(&rounds, &config, swiss_pairings::random_by_scoregroup)
             .unwrap();
     println!("{pairings:?}");
@@ -118,7 +120,7 @@ fn weird_16() {
 
     println!("{}", format_bracket(&rounds));
 
-    let (pairings, standings) =
+    let (pairings, _standings) =
         swiss_pairings::swiss_pairings(&rounds, &config, swiss_pairings::random_by_scoregroup)
             .unwrap();
     println!("{pairings:?}");
@@ -140,19 +142,19 @@ fn degenerate_16() {
 
     println!("{}", format_bracket(&rounds));
 
-    let (pairings, standings) =
+    let (pairings, _standings) =
         swiss_pairings::swiss_pairings(&rounds, &config, swiss_pairings::random_by_scoregroup)
             .unwrap();
     println!("{pairings:?}");
 }
 
 fn main() -> anyhow::Result<()> {
-    // a_specific_6p_bracket();
-    // another_specific_6p_bracket();
-    // a_6p_with_draws();
-    // weird_16();
+    a_specific_6p_bracket();
+    another_specific_6p_bracket();
+    a_6p_with_draws();
+    weird_16();
     degenerate_16();
-    return Ok(());
+    // return Ok(());
     dotenv::dotenv().ok();
     let iterations = var("ITERATIONS")
         .map(|s| s.parse::<i32>().unwrap())

@@ -5,7 +5,7 @@ extern crate swiss_pairings;
 use rand::{thread_rng, Rng};
 use std::cmp::max;
 use std::collections::HashMap;
-use swiss_pairings::{MatchResult, Player, Score, TourneyConfig};
+use swiss_pairings::{MatchResult, Player, TourneyConfig};
 
 fn p1_win<'a, P: Player>(p1: &'a P, p2: &'a P) -> MatchResult<'a, P> {
     MatchResult::Player1Win { p1, p2 }
