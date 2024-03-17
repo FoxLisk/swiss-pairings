@@ -231,7 +231,7 @@ fn main() -> anyhow::Result<()> {
 ///     where downpairing = the discrepancy between 2 players scores during a pairing, and
 ///           standings are a (sorted) vector of (player, score) tuples
 ///    note that this is not returning a winner, since we don't actually run the final round.
-fn do_a_bracket(players: Vec<char>) -> Result<(i32, Vec<(char, i32)>), String> {
+fn do_a_bracket(players: Vec<char>) -> anyhow::Result<(i32, Vec<(char, i32)>)> {
     let nrounds = (players.len() as f64).log2().ceil() as i32;
     assert!(2_usize.pow(nrounds as u32) >= players.len());
     assert!(2_usize.pow((nrounds - 1) as u32) < players.len());
@@ -248,7 +248,7 @@ fn do_a_bracket(players: Vec<char>) -> Result<(i32, Vec<(char, i32)>), String> {
         initial_pairings.push((&players[2 * i], &players[2 * i + 1]));
     }
     assert_eq!(players.len() / 2, initial_pairings.len());
-    let mut decider = thread_rng();
+    let mut decider = Decider::new()?;
     let first_round = decide_matchups(&initial_pairings, &mut decider);
     let mut rounds: Vec<Vec<MatchResult<char>>> = vec![first_round];
 
@@ -277,7 +277,7 @@ fn do_a_bracket(players: Vec<char>) -> Result<(i32, Vec<(char, i32)>), String> {
         match swiss_pairings::swiss_pairings(&rounds, &config, f) {
             Ok(stuff) => stuff,
             Err(e) => {
-                return Err(format!(
+                return Err(anyhow!(
                     "Error pairing the final round! {}
                  Previous rounds: {}",
                     e,
@@ -308,19 +308,36 @@ fn decide_matchups<'a, P: Player, D: DecideWinner<P>>(
     results
 }
 
-trait DecideWinner<P: Player> {
-    fn decide_winner<'a>(&mut self, players: (&'a P, &'a P)) -> MatchResult<'a, P>;
+struct Decider {
+    rng: ThreadRng,
+    draw_chance: f64,
 }
 
-impl<P: Player> DecideWinner<P> for ThreadRng {
+impl Decider {
+    fn new() -> anyhow::Result<Self> {
+        let draw_chance = var("DRAW_CHANCE")?.parse()?;
+        Ok(Self {
+            rng: thread_rng(),
+            draw_chance,
+        })
+    }
+}
+
+impl<P: Player> DecideWinner<P> for Decider {
     fn decide_winner<'a>(&mut self, players: (&'a P, &'a P)) -> MatchResult<'a, P> {
         let (p1, p2) = players;
-        if self.gen_bool(0.3) {
-            Player1Win { p1, p2 }
-        } else if self.gen_bool(0.5) {
-            Player2Win { p1, p2 }
-        } else {
+        if self.rng.gen_bool(self.draw_chance) {
             MatchResult::Draw { p1: p1, p2: p2 }
+        } else {
+            if self.rng.gen_bool(0.5) {
+                Player1Win { p1, p2 }
+            } else {
+                Player2Win { p1, p2 }
+            }
         }
     }
+}
+
+trait DecideWinner<P: Player> {
+    fn decide_winner<'a>(&mut self, players: (&'a P, &'a P)) -> MatchResult<'a, P>;
 }
