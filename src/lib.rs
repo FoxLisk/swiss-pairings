@@ -10,6 +10,9 @@ use itertools::Itertools;
 use permutation_utils::pair_partitions;
 use permutator::HeapPermutationRefIter;
 
+use rand::seq::SliceRandom;
+use rand::thread_rng;
+
 mod permutation_utils;
 
 // player order matters for determining initial pairing
@@ -333,9 +336,12 @@ fn rec_pair<'a, P: Player>(
     };
 
     if our_score_group.is_empty() {
-        return Some(vec![]);
+        // sometimes we get called with an empty score group because everyone from it has been
+        // "borrowed" to make the next-highest score group pair successfully
+        return rec_pair(score_groups, opponents);
     }
 
+    // TODO benchmark this and see if doing this faster is relevant
     let is_valid_pairing = |p: &Vec<(&P, &P)>| {
         for (p1, p2) in p {
             if opponents.get(p1).map(|os| os.contains(p2)).unwrap_or(false) {
@@ -346,21 +352,29 @@ fn rec_pair<'a, P: Player>(
     };
 
     println!(
-        "rec_pair: trying to pair score group {}",
-        our_score_group.iter().map(|p| p.id()).join(" ")
+        "rec_pair: trying to pair score group {}\n    remaining score groups: {}",
+        our_score_group.iter().map(|p| p.id()).join(" "),
+        score_groups.iter().map(|s| s.iter().map(|p| p.id()).join(" "))
+            .join("; ")
     );
 
     if our_score_group.len() % 2 == 0 {
-        let pairings = pair_partitions(our_score_group.copy_references()).ok()?;
+        let mut pairings = pair_partitions(our_score_group.copy_references()).ok()?;
+        let mut rng = thread_rng();
+        pairings.shuffle(&mut rng);
         for pairing in pairings {
+            let blargh = score_groups.iter().map(|v| v.copy_references()).collect::<_>();
             if is_valid_pairing(&pairing) {
-                let mut rest_paired = rec_pair(score_groups, opponents)?;
-                rest_paired.extend(pairing);
-                return Some(rest_paired);
+                if let Some(mut rest_paired) = rec_pair(blargh, opponents){
+                    rest_paired.extend(pairing);
+                    return Some(rest_paired);
+                }
             }
         }
     }
-    let next_group = score_groups.pop()?;
+    let mut next_group = score_groups.pop()?;
+    let mut rng = thread_rng();
+    next_group.shuffle(&mut rng);
     let mut i = 0;
     while i < next_group.len() {
         let mut our_group_copy = our_score_group.copy_references();
