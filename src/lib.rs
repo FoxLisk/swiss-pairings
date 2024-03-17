@@ -261,7 +261,6 @@ pub fn random_by_scoregroup<'a, P: Player>(
     let mut score_groups = score_groups_builder.into_iter().collect::<Vec<_>>();
     score_groups.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-    // println!("Calling rec_pair");
     match rec_pair(
         score_groups.into_iter().map(|(_, p)| p).collect::<_>(),
         opponents,

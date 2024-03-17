@@ -8,6 +8,8 @@ use std::collections::VecDeque;
 ///     [(1, 3), (2, 4)],
 ///     [(1, 4), (2, 3)],
 /// ]
+///
+/// Note that this actually allocates memory for all the partitions which means it is not appropriate for long lists
 pub(crate) fn pair_partitions<'a, T>(
     things: Vec<&'a T>,
 ) -> Result<Vec<Vec<(&'a T, &'a T)>>, String> {
@@ -111,5 +113,4 @@ mod tests {
             pair_partitions(vec![&1, &2, &3, &4])
         );
     }
-
 }
