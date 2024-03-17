@@ -2,9 +2,6 @@ extern crate core;
 extern crate rand;
 extern crate swiss_pairings;
 
-use rand::{thread_rng, Rng};
-use std::cmp::max;
-use std::collections::HashMap;
 use swiss_pairings::{MatchResult, Player, TourneyConfig};
 
 fn p1_win<'a, P: Player>(p1: &'a P, p2: &'a P) -> MatchResult<'a, P> {
@@ -120,12 +117,11 @@ fn main() -> Result<(), String> {
         ],
     ];
 
-    // let f = swiss_pairings::monrad_pairings_shuffle_between;
-
-    // // round 1 was handled separately above because of poor design decisions
-    // let (pairings, standings) = swiss_pairings::swiss_pairings(&rounds, &config, f).unwrap();
-    // println!("pairings:  {:?}", pairings);
-    // println!("   standings: {:?}", standings);
+    let f = swiss_pairings::random_by_scoregroup;
+    // round 1 was handled separately above because of poor design decisions
+    let (pairings, standings) = swiss_pairings::swiss_pairings(&rounds, &config, f).unwrap();
+    println!("pairings:  {:?}", pairings);
+    println!("   standings: {:?}", standings);
 
     Ok(())
 }

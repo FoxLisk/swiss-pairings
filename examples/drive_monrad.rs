@@ -324,26 +324,3 @@ impl<P: Player> DecideWinner<P> for ThreadRng {
         }
     }
 }
-
-enum Decider {
-    P1Win,
-    P2Win,
-    Random(ThreadRng),
-}
-
-impl<P: Player> DecideWinner<P> for Decider {
-    fn decide_winner<'a>(&mut self, players: (&'a P, &'a P)) -> MatchResult<'a, P> {
-        let (p1, p2) = players;
-        match self {
-            Decider::P1Win => Player1Win { p1, p2 },
-            Decider::P2Win => Player2Win { p1, p2 },
-            Decider::Random(rng) => {
-                if rng.gen_bool(0.5) {
-                    Player1Win { p1, p2 }
-                } else {
-                    Player2Win { p1, p2 }
-                }
-            }
-        }
-    }
-}

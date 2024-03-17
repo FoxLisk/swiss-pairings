@@ -5,7 +5,6 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 
-use itertools::Itertools;
 use permutation_utils::pair_partitions;
 
 use rand::seq::SliceRandom;
@@ -281,7 +280,8 @@ pub fn random_by_scoregroup<'a, P: Player>(
 ///   2a. if pairing succeeds, try to recursively pair remaining players
 ///   2b. if this also succeeds, return this result
 /// 3. if it's an odd number of players or 2a. fails:
-///   3a. for each player in the *next* score group
+///   3a. for each player in the *next* score group:
+///     3ai. try adding them to this score group and recursing
 fn rec_pair<'a, P: Player>(
     mut score_groups: Vec<Vec<&'a P>>,
     opponents: &HashMap<&'a P, HashSet<&'a P>>,
@@ -403,20 +403,8 @@ pub fn monrad_pairings<'a, P: Player>(
     Ok(pairings)
 }
 
-#[derive(PartialEq, Eq, Hash, Debug)]
-struct MyPlayer {
-    id: String,
-}
-
-impl Player for MyPlayer {
-    fn id(&self) -> String {
-        self.id.clone()
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
 
     use crate::{monrad_pairings, swiss_pairings, MatchResult, Player, TourneyConfig};
 
