@@ -16,13 +16,22 @@ use swiss_pairings::{format_bracket, MatchResult, Player, Score, TourneyConfig};
 
 macro_rules! matchup {
     ($p1:ident > $p2:ident) => {
-        swiss_pairings::MatchResult::Player1Win { p1: & stringify!($p1) , p2: & stringify!($p2) }
+        swiss_pairings::MatchResult::Player1Win {
+            p1: &stringify!($p1),
+            p2: &stringify!($p2),
+        }
     };
     ($p1:ident = $p2:ident) => {
-        swiss_pairings::MatchResult::Draw { p1: & stringify!($p1) , p2: & stringify!($p2) }
+        swiss_pairings::MatchResult::Draw {
+            p1: &stringify!($p1),
+            p2: &stringify!($p2),
+        }
     };
     ($p1:ident < $p2:ident) => {
-        swiss_pairings::MatchResult::Player2Win { p1: & stringify!($p1) , p2: & stringify!($p2) }
+        swiss_pairings::MatchResult::Player2Win {
+            p1: &stringify!($p1),
+            p2: &stringify!($p2),
+        }
     };
 }
 
@@ -42,16 +51,8 @@ fn a_specific_6p_bracket() {
         error_on_repeated_opponent: true,
     };
     let rounds = vec![
-        matchups! [
-            A > B,
-            C < D,
-            E > F,
-        ],
-        matchups! [
-            D > E,
-            A < C,
-            B < F
-        ]
+        matchups![A > B, C < D, E > F,],
+        matchups![D > E, A < C, B < F],
     ];
 
     println!("{}", format_bracket(&rounds));
@@ -70,16 +71,8 @@ fn another_specific_6p_bracket() {
         error_on_repeated_opponent: true,
     };
     let rounds = vec![
-        matchups! [
-            A < B,
-            C > D,
-            E > F
-        ],
-        matchups! [
-            F < A,
-            B < C,
-            E > D
-        ]
+        matchups![A < B, C > D, E > F],
+        matchups![F < A, B < C, E > D],
     ];
 
     println!("{}", format_bracket(&rounds));
@@ -99,16 +92,8 @@ fn a_6p_with_draws() {
     };
     // let mut initial_pairings = vec![(&p0, &p1), (&p2, &p3), (&p4, &p5)];
     let rounds = vec![
-        matchups! [
-            A = B,
-            C = D,
-            E > F
-        ],
-        matchups! [
-            B < D,
-            F > A,
-            E = C
-        ]
+        matchups![A = B, C = D, E > F],
+        matchups![B < D, F > A, E = C],
     ];
 
     println!("{}", format_bracket(&rounds));
@@ -127,26 +112,8 @@ fn weird_16() {
         error_on_repeated_opponent: true,
     };
     let rounds = vec![
-        matchups! [
-            A = B,
-            C > D,
-            E = F,
-            G < H,
-            I < J,
-            K = L,
-            M = N,
-            O = P
-        ],
-        matchups! [
-            I > G,
-            N = P,
-            O = B,
-            M = A,
-            F = K,
-            E < D,
-            H > C,
-            J = L
-        ]
+        matchups![A = B, C > D, E = F, G < H, I < J, K = L, M = N, O = P],
+        matchups![I > G, N = P, O = B, M = A, F = K, E < D, H > C, J = L],
     ];
 
     println!("{}", format_bracket(&rounds));
@@ -166,36 +133,9 @@ fn degenerate_16() {
         error_on_repeated_opponent: true,
     };
     let rounds = vec![
-        matchups![
-A = B,
-C > D,
-E < F,
-G = H,
-I = J,
-K > L,
-M < N,
-O < P,
-        ],
-        matchups![
-E < D,
-L = M,
-A < G,
-B < I,
-O < J,
-K > N,
-C < H,
-P = F,
-        ],
-matchups![
-E > O,
-M = A,
-C = B,
-D < L,
-F = G,
-J > H,
-I = N,
-K = P,
-]
+        matchups![A = B, C > D, E < F, G = H, I = J, K > L, M < N, O < P,],
+        matchups![E < D, L = M, A < G, B < I, O < J, K > N, C < H, P = F,],
+        matchups![E > O, M = A, C = B, D < L, F = G, J > H, I = N, K = P,],
     ];
 
     println!("{}", format_bracket(&rounds));
@@ -205,7 +145,6 @@ K = P,
             .unwrap();
     println!("{pairings:?}");
 }
-
 
 fn main() -> anyhow::Result<()> {
     // a_specific_6p_bracket();
@@ -406,4 +345,3 @@ impl<P: Player> DecideWinner<P> for Decider {
         }
     }
 }
-
