@@ -117,9 +117,8 @@ fn main() -> Result<(), String> {
         ],
     ];
 
-    let f = swiss_pairings::random_by_scoregroup;
     // round 1 was handled separately above because of poor design decisions
-    let (pairings, standings) = swiss_pairings::swiss_pairings(&rounds, &config, f).unwrap();
+    let (pairings, standings) = swiss_pairings::swiss_pairings(&rounds, &config, None).unwrap();
     println!("pairings:  {:?}", pairings);
     println!("   standings: {:?}", standings);
 

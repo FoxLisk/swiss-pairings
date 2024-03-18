@@ -1,9 +1,7 @@
-extern crate itertools;
-
 use std::collections::{HashMap, HashSet};
-use std::error::Error;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
 use std::hash::Hash;
+use std::time::{Duration, Instant};
 
 use permutation_utils::pair_partitions;
 
@@ -72,56 +70,27 @@ impl<T: Eq + Hash + Debug + ToString> Player for T {
 
 pub type Round<'a, P> = Vec<MatchResult<'a, P>>;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, thiserror::Error)]
 pub enum PairingError {
-    /// No first round given (you do the first round yourself with whatever seeding you want)
+    #[error(
+        "No first round given (you do the first round yourself with whatever seeding you want"
+    )]
     MissingInitialRound,
-    /// A player was involved in multiple matches in the same round
-    DuplicatePlayer {
-        id: String,
-    },
-    /// A player was added after the first round (which is not currently handled)
-    UnexpectedPlayerAdded {
-        id: String,
-    },
-    /// The pairing algorithm can be configured to error on repeated pairings in the history
-    RepeatedPairing {
-        p1: String,
-        p2: String,
-    },
-    /// you cannot pair zero players
+    #[error("A player was involved in multiple matches in the same round: {id}")]
+    DuplicatePlayer { id: String },
+    #[error("A player ({id}) was added after the first round (which is not currently handled)")]
+    UnexpectedPlayerAdded { id: String },
+    #[error("Repeated pairing: {p1} vs {p2}")]
+    RepeatedPairing { p1: String, p2: String },
+    #[error("You cannot pair zero players")]
     NoPlayers,
-    Other {
-        err: String,
-    },
+    #[error("No valid pairing found")]
+    NoValidPairing,
+    #[error("Timed out generating pairings")]
+    Timeout,
+    #[error("Other error: {0}")]
+    Other(String),
 }
-
-impl Display for PairingError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PairingError::MissingInitialRound => {
-                write!(f, "Missing initial round")
-            }
-            PairingError::DuplicatePlayer { id } => {
-                write!(f, "Duplicate player with id {}", id)
-            }
-            PairingError::UnexpectedPlayerAdded { id } => {
-                write!(f, "Player unexpectedly added after first round: {}", id)
-            }
-            PairingError::RepeatedPairing { p1, p2 } => {
-                write!(f, "Illegal repeated pairing found: {} vs {}", p1, p2)
-            }
-            PairingError::NoPlayers => {
-                write!(f, "No players given?")
-            }
-            PairingError::Other { err } => {
-                write!(f, "Other error: {}", err)
-            }
-        }
-    }
-}
-
-impl Error for PairingError {}
 
 /// Scores are integers for ease of implementation. if you want 1/0/0.5, use 2/0/1 and divide
 pub type Score = i32;
@@ -150,19 +119,52 @@ fn scores<'a, P: Player>(
     }
 }
 
+struct TimedOutChecker {
+    no_timeout: bool,
+    start: Instant,
+    duration: Duration,
+}
+
+impl TimedOutChecker {
+    fn new(dur: Option<Duration>) -> Self {
+        match dur {
+            Some(d) => Self {
+                no_timeout: false,
+                start: Instant::now(),
+                duration: d,
+            },
+            None => Self {
+                no_timeout: true,
+                start: Instant::now(),
+                duration: Duration::from_millis(1),
+            },
+        }
+    }
+
+    fn timed_out(&self) -> bool {
+        if self.no_timeout {
+            false
+        } else {
+            let passed = Instant::now().duration_since(self.start);
+            if passed > self.duration {
+                true
+            } else {
+                // println!(
+                //     "Only {passed:?} has passed, which is less than {:?}",
+                //     self.duration
+                // );
+                false
+            }
+        }
+    }
+}
+
 /// mind your own first round pairings
-pub fn swiss_pairings<'a, P: Player, F>(
+pub fn swiss_pairings<'a, P: Player>(
     rounds: &[Round<'a, P>],
     config: &TourneyConfig,
-    pairings_result: F,
-) -> Result<(Vec<(&'a P, &'a P)>, Vec<(&'a P, Score)>), PairingError>
-where
-    F: FnOnce(
-        &[&'a P],
-        &HashMap<&'a P, Score>,
-        &HashMap<&'a P, HashSet<&'a P>>,
-    ) -> Result<Vec<(&'a P, &'a P)>, PairingError>,
-{
+    timeout: Option<Duration>,
+) -> Result<(Vec<(&'a P, &'a P)>, Vec<(&'a P, Score)>), PairingError> {
     let nrounds = rounds.len();
     if nrounds == 0 {
         return Err(PairingError::MissingInitialRound);
@@ -229,7 +231,9 @@ where
         }
     }
 
-    let pairings = pairings_result(&initial_seeding, &player_scores, &opponents)?;
+    let timer = TimedOutChecker::new(timeout);
+
+    let pairings = random_by_scoregroup(&initial_seeding, &player_scores, &opponents, &timer)?;
 
     let initial_seeds: HashMap<&P, usize> = initial_seeding
         .into_iter()
@@ -245,10 +249,11 @@ where
 
 /// the idea on this one is to go through the score groups, and in each score group, try
 /// permutations until you find one that results in a valid pairing
-pub fn random_by_scoregroup<'a, P: Player>(
+fn random_by_scoregroup<'a, P: Player>(
     initial_seeding: &[&'a P],
     scores: &HashMap<&'a P, Score>,
     opponents: &HashMap<&'a P, HashSet<&'a P>>,
+    timer: &TimedOutChecker,
 ) -> Result<Vec<(&'a P, &'a P)>, PairingError> {
     if scores.is_empty() {
         return Err(PairingError::MissingInitialRound);
@@ -261,15 +266,11 @@ pub fn random_by_scoregroup<'a, P: Player>(
     let mut score_groups = score_groups_builder.into_iter().collect::<Vec<_>>();
     score_groups.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-    match rec_pair(
+    rec_pair(
         score_groups.into_iter().map(|(_, p)| p).collect::<_>(),
         opponents,
-    ) {
-        Some(p) => Ok(p),
-        None => Err(PairingError::Other {
-            err: "Unable to find a valid pairing".to_string(),
-        }),
-    }
+        timer,
+    )
 }
 
 /// pairs all players using a recursive implementation of the following algorithm:
@@ -284,18 +285,22 @@ pub fn random_by_scoregroup<'a, P: Player>(
 fn rec_pair<'a, P: Player>(
     mut score_groups: Vec<Vec<&'a P>>,
     opponents: &HashMap<&'a P, HashSet<&'a P>>,
-) -> Option<Vec<(&'a P, &'a P)>> {
+    time_checker: &TimedOutChecker,
+) -> Result<Vec<(&'a P, &'a P)>, PairingError> {
+    if time_checker.timed_out() {
+        return Err(PairingError::Timeout);
+    }
     let our_score_group = match score_groups.pop() {
         Some(p) => p,
         None => {
-            return Some(vec![]);
+            return Ok(vec![]);
         }
     };
 
     if our_score_group.is_empty() {
         // sometimes we get called with an empty score group because everyone from it has been
         // "borrowed" to make the next-highest score group pair successfully
-        return rec_pair(score_groups, opponents);
+        return rec_pair(score_groups, opponents, time_checker);
     }
 
     // TODO benchmark this and see if doing this faster is relevant
@@ -318,23 +323,30 @@ fn rec_pair<'a, P: Player>(
     // );
 
     if our_score_group.len() % 2 == 0 {
-        let mut pairings = pair_partitions(our_score_group.copy_references()).ok()?;
+        let mut pairings = pair_partitions(our_score_group.copy_references())
+            .map_err(|e| PairingError::Other(e))?;
         let mut rng = thread_rng();
         pairings.shuffle(&mut rng);
         for pairing in pairings {
-            let blargh = score_groups
-                .iter()
-                .map(|v| v.copy_references())
-                .collect::<_>();
             if is_valid_pairing(&pairing) {
-                if let Some(mut rest_paired) = rec_pair(blargh, opponents) {
-                    rest_paired.extend(pairing);
-                    return Some(rest_paired);
+                let score_groups_copied = score_groups
+                    .iter()
+                    .map(|v| v.copy_references())
+                    .collect::<_>();
+                match rec_pair(score_groups_copied, opponents, time_checker) {
+                    Ok(mut rest_paired) => {
+                        rest_paired.extend(pairing);
+                        return Ok(rest_paired);
+                    }
+                    Err(PairingError::Timeout) => {
+                        return Err(PairingError::Timeout);
+                    }
+                    Err(_) => {}
                 }
             }
         }
     }
-    let mut next_group = score_groups.pop()?;
+    let mut next_group = score_groups.pop().ok_or(PairingError::NoValidPairing)?;
     let mut rng = thread_rng();
     next_group.shuffle(&mut rng);
     let mut i = 0;
@@ -346,13 +358,19 @@ fn rec_pair<'a, P: Player>(
         our_group_copy.push(trial_person);
         score_groups_copy.push(next_group_copy);
         score_groups_copy.push(our_group_copy);
-        if let Some(pairings) = rec_pair(score_groups_copy, opponents) {
-            return Some(pairings);
+        match rec_pair(score_groups_copy, opponents, time_checker) {
+            Ok(pairings) => {
+                return Ok(pairings);
+            }
+            Err(PairingError::Timeout) => {
+                return Err(PairingError::Timeout);
+            }
+            Err(_) => {}
         }
         i += 1;
     }
 
-    None
+    Err(PairingError::NoValidPairing)
 }
 
 trait CopyReferences {
@@ -362,200 +380,5 @@ trait CopyReferences {
 impl<T> CopyReferences for Vec<&T> {
     fn copy_references(&self) -> Self {
         self.iter().map(|e| *e).collect()
-    }
-}
-
-/// i.e. 1v2, 3v4, etc
-pub fn monrad_pairings<'a, P: Player>(
-    initial_seeding: &[&'a P],
-    scores: &HashMap<&'a P, Score>,
-    opponents: &HashMap<&'a P, HashSet<&'a P>>,
-) -> Result<Vec<(&'a P, &'a P)>, PairingError> {
-    let initial_seeds: HashMap<&P, usize> = initial_seeding
-        .into_iter()
-        .enumerate()
-        .map(|(k, v)| (*v, k))
-        .collect();
-    let mut standings = scores
-        .into_iter()
-        .map(|(k, v)| (*k, *v))
-        .collect::<Vec<(&P, Score)>>();
-
-    standings.sort_by_key(|(p, s)| (-s, initial_seeds.get(p).unwrap_or(&999)));
-
-    let mut pairings: Vec<(&P, &P)> = Vec::with_capacity(standings.len());
-    let mut unpaired = standings.clone();
-    // top players at the end so we can pop()
-    unpaired.reverse();
-
-    while unpaired.len() > 1 {
-        let p1 = unpaired.pop().unwrap().0;
-        let opps = opponents.get(p1).unwrap();
-        for i in (0..unpaired.len()).rev() {
-            if !opps.contains(unpaired[i].0) {
-                let p2 = unpaired.remove(i).0;
-                pairings.push((p1, p2));
-                break;
-            }
-        }
-    }
-    Ok(pairings)
-}
-
-#[cfg(test)]
-mod tests {
-
-    use crate::{monrad_pairings, swiss_pairings, MatchResult, Player, TourneyConfig};
-
-    #[derive(PartialEq, Eq, Hash, Debug)]
-    struct TestPlayer {
-        id: String,
-    }
-
-    impl Player for TestPlayer {
-        fn id(&self) -> String {
-            self.id.clone()
-        }
-    }
-
-    #[test]
-    fn test_r1_standings() {
-        let mut players = vec![];
-        for i in 0..8 {
-            players.push(TestPlayer {
-                id: format!("p{}", i),
-            });
-        }
-
-        let r1 = MatchResult::Player1Win {
-            p1: &players[0],
-            p2: &players[1],
-        };
-
-        let r2 = MatchResult::Player1Win {
-            p1: &players[2],
-            p2: &players[3],
-        };
-
-        let r3 = MatchResult::Draw {
-            p1: &players[4],
-            p2: &players[5],
-        };
-        let r4 = MatchResult::Player2Win {
-            p1: &players[6],
-            p2: &players[7],
-        };
-
-        let config = TourneyConfig {
-            points_per_win: 2,
-            points_per_loss: 0,
-            points_per_draw: 1,
-            error_on_repeated_opponent: true,
-        };
-        let standings =
-            swiss_pairings(&vec![vec![r1, r2, r3, r4]], &config, monrad_pairings).unwrap();
-        assert_eq![
-            vec![
-                (&players[0], 2),
-                (&players[2], 2),
-                (&players[7], 2),
-                (&players[4], 1),
-                (&players[5], 1),
-                (&players[1], 0),
-                (&players[3], 0),
-                (&players[6], 0)
-            ],
-            standings.1
-        ];
-        assert_eq![
-            vec![
-                (&players[0], &players[2]),
-                (&players[7], &players[4]),
-                (&players[5], &players[1]),
-                (&players[3], &players[6]),
-            ],
-            standings.0,
-        ];
-    }
-
-    #[test]
-    fn test_r2_standings() {
-        let mut players = vec![];
-        for i in 0..8 {
-            players.push(TestPlayer {
-                id: format!("p{}", i),
-            });
-        }
-
-        let r1 = vec![
-            MatchResult::Player1Win {
-                p1: &players[0],
-                p2: &players[1],
-            },
-            MatchResult::Player1Win {
-                p1: &players[2],
-                p2: &players[3],
-            },
-            MatchResult::Draw {
-                p1: &players[4],
-                p2: &players[5],
-            },
-            MatchResult::Player2Win {
-                p1: &players[6],
-                p2: &players[7],
-            },
-        ];
-
-        let r2 = vec![
-            MatchResult::Player1Win {
-                p1: &players[0],
-                p2: &players[2],
-            },
-            MatchResult::Player2Win {
-                p1: &players[7],
-                p2: &players[4],
-            },
-            MatchResult::Player1Win {
-                p1: &players[5],
-                p2: &players[1],
-            },
-            MatchResult::Player2Win {
-                p1: &players[3],
-                p2: &players[6],
-            },
-        ];
-
-        let config = TourneyConfig {
-            points_per_win: 2,
-            points_per_loss: 0,
-            points_per_draw: 1,
-            error_on_repeated_opponent: true,
-        };
-        let (pairings, standings) =
-            swiss_pairings(&vec![r1, r2], &config, monrad_pairings).unwrap();
-        assert_eq![
-            vec![
-                (&players[0], 4),
-                (&players[4], 3),
-                (&players[5], 3),
-                (&players[2], 2),
-                (&players[6], 2),
-                (&players[7], 2),
-                (&players[1], 0),
-                (&players[3], 0),
-            ],
-            standings
-        ];
-
-        assert_eq![
-            vec![
-                (&players[0], &players[4]),
-                (&players[5], &players[2]),
-                // 6 vs 7 already happened, so 6 gets paired with 1, and 7 with 3
-                (&players[6], &players[1]),
-                (&players[7], &players[3]),
-            ],
-            pairings
-        ];
     }
 }

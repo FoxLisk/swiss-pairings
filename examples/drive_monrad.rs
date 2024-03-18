@@ -11,10 +11,11 @@ use rand::{thread_rng, Rng};
 use std::cmp::max;
 use std::collections::HashMap;
 use std::io::Write;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{env, io};
 use swiss_pairings::MatchResult::{Player1Win, Player2Win};
-use swiss_pairings::{format_bracket, MatchResult, Player, Score, TourneyConfig};
+use swiss_pairings::{format_bracket, MatchResult, PairingError, Player, Score, TourneyConfig};
+use thiserror::Error;
 
 macro_rules! matchup {
     ($p1:ident > $p2:ident) => {
@@ -59,9 +60,7 @@ fn a_specific_6p_bracket() {
 
     println!("{}", format_bracket(&rounds));
 
-    let (pairings, _standings) =
-        swiss_pairings::swiss_pairings(&rounds, &config, swiss_pairings::random_by_scoregroup)
-            .unwrap();
+    let (pairings, _standings) = swiss_pairings::swiss_pairings(&rounds, &config, None).unwrap();
     println!("{pairings:?}");
 }
 
@@ -79,9 +78,7 @@ fn another_specific_6p_bracket() {
 
     println!("{}", format_bracket(&rounds));
 
-    let (pairings, _standings) =
-        swiss_pairings::swiss_pairings(&rounds, &config, swiss_pairings::random_by_scoregroup)
-            .unwrap();
+    let (pairings, _standings) = swiss_pairings::swiss_pairings(&rounds, &config, None).unwrap();
     println!("{pairings:?}");
 }
 
@@ -100,9 +97,7 @@ fn a_6p_with_draws() {
 
     println!("{}", format_bracket(&rounds));
 
-    let (pairings, _standings) =
-        swiss_pairings::swiss_pairings(&rounds, &config, swiss_pairings::random_by_scoregroup)
-            .unwrap();
+    let (pairings, _standings) = swiss_pairings::swiss_pairings(&rounds, &config, None).unwrap();
     println!("{pairings:?}");
 }
 
@@ -120,9 +115,7 @@ fn weird_16() {
 
     println!("{}", format_bracket(&rounds));
 
-    let (pairings, _standings) =
-        swiss_pairings::swiss_pairings(&rounds, &config, swiss_pairings::random_by_scoregroup)
-            .unwrap();
+    let (pairings, _standings) = swiss_pairings::swiss_pairings(&rounds, &config, None).unwrap();
     println!("{pairings:?}");
 }
 
@@ -142,9 +135,7 @@ fn degenerate_16() {
 
     println!("{}", format_bracket(&rounds));
 
-    let (pairings, _standings) =
-        swiss_pairings::swiss_pairings(&rounds, &config, swiss_pairings::random_by_scoregroup)
-            .unwrap();
+    let (pairings, _standings) = swiss_pairings::swiss_pairings(&rounds, &config, None).unwrap();
     println!("{pairings:?}");
 }
 
@@ -187,13 +178,14 @@ fn main() -> anyhow::Result<()> {
                 println!();
             }
         }
+        // let start_t = Instant::now();
         let (gap, standings) = match do_a_bracket(players.clone()) {
             Ok(whatever) => whatever,
             Err(e) => {
-                println!("{e}");
-                return Err(anyhow!(""));
+                return Err(anyhow!("{e}"));
             }
         };
+        // println!("That one took {:?}", Instant::now() - start_t);
         let e = gaps.entry(gap).or_insert(0);
         *e += 1;
 
@@ -223,6 +215,23 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Error, Debug)]
+enum DoABracketError {
+    #[error("{0}")]
+    Failed(String),
+    #[error("Timeout")]
+    TimedOut,
+}
+
+impl From<PairingError> for DoABracketError {
+    fn from(value: PairingError) -> Self {
+        match value {
+            PairingError::Timeout => DoABracketError::TimedOut,
+            _ => DoABracketError::Failed(format!("{value}")),
+        }
+    }
+}
+
 /// what this actually does is:
 /// 1. establish an initial bracket with monrad pairings (1v2, 3v4, 5v6...)
 /// 2. run n-1 rounds, where n is what you expect (ceil(log2(number of players))
@@ -231,7 +240,7 @@ fn main() -> anyhow::Result<()> {
 ///     where downpairing = the discrepancy between 2 players scores during a pairing, and
 ///           standings are a (sorted) vector of (player, score) tuples
 ///    note that this is not returning a winner, since we don't actually run the final round.
-fn do_a_bracket(players: Vec<char>) -> anyhow::Result<(i32, Vec<(char, i32)>)> {
+fn do_a_bracket(players: Vec<char>) -> Result<(i32, Vec<(char, i32)>), DoABracketError> {
     let nrounds = (players.len() as f64).log2().ceil() as i32;
     assert!(2_usize.pow(nrounds as u32) >= players.len());
     assert!(2_usize.pow((nrounds - 1) as u32) < players.len());
@@ -248,18 +257,18 @@ fn do_a_bracket(players: Vec<char>) -> anyhow::Result<(i32, Vec<(char, i32)>)> {
         initial_pairings.push((&players[2 * i], &players[2 * i + 1]));
     }
     assert_eq!(players.len() / 2, initial_pairings.len());
-    let mut decider = Decider::new()?;
+    let mut decider = Decider::new().unwrap();
     let first_round = decide_matchups(&initial_pairings, &mut decider);
     let mut rounds: Vec<Vec<MatchResult<char>>> = vec![first_round];
 
     let mut greatest_downpairing = 0;
 
-    let f = swiss_pairings::random_by_scoregroup;
-
     // round 1 was handled separately above because of poor design decisions
     // final round is handled separately below
     for _round_num in 2..nrounds {
-        let (pairings, standings) = swiss_pairings::swiss_pairings(&rounds, &config, f).unwrap();
+        let (pairings, standings) =
+            swiss_pairings::swiss_pairings(&rounds, &config, Some(Duration::from_millis(2000)))
+                .map_err::<DoABracketError, _>(From::from)?;
         let points: HashMap<&char, Score> = HashMap::from_iter(standings);
         for e in &pairings {
             let (p1, p2): &(&char, &char) = e;
@@ -274,19 +283,19 @@ fn do_a_bracket(players: Vec<char>) -> anyhow::Result<(i32, Vec<(char, i32)>)> {
     }
 
     let (_final_pairings, final_standings) =
-        match swiss_pairings::swiss_pairings(&rounds, &config, f) {
+        match swiss_pairings::swiss_pairings(&rounds, &config, Some(Duration::from_millis(2500))) {
             Ok(stuff) => stuff,
+            Err(swiss_pairings::PairingError::Timeout) => return Err(DoABracketError::TimedOut),
             Err(e) => {
-                return Err(anyhow!(
-                    "Error pairing the final round! {}
+                return Err(DoABracketError::Failed(format!(
+                    "Error pairing the final round! {e}
                  Previous rounds: {}",
-                    e,
                     format_bracket(&rounds)
-                ));
+                )));
             }
         };
 
-    if greatest_downpairing > 0 || env::var("DEBUG").is_ok() {
+    if env::var("DEBUG").is_ok() {
         println!("{}", format_bracket(&rounds));
         println!("{:?}", final_standings);
     }
