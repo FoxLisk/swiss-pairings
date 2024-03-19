@@ -73,7 +73,7 @@ pub type Round<'a, P> = Vec<MatchResult<'a, P>>;
 #[derive(Debug, PartialEq, thiserror::Error)]
 pub enum PairingError {
     #[error(
-        "No first round given (you do the first round yourself with whatever seeding you want"
+        "No first round given (you do the first round yourself with whatever seeding you want)"
     )]
     MissingInitialRound,
     #[error("A player was involved in multiple matches in the same round: {id}")]
